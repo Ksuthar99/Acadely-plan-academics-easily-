@@ -250,4 +250,9 @@ The system is intended to support the HOD in organizing academic activities rath
 
 ---
 
+*Images =>*
+
+<img width="1314" height="870" alt="acadelyP" src="https://github.com/user-attachments/assets/ca6edfa6-0392-480c-8dc2-1e5c0d5bc254" />
+
+
 
