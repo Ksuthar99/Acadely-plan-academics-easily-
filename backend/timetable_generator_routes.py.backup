@@ -1,0 +1,472 @@
+from flask import Blueprint, request, jsonify
+from datetime import datetime
+
+from extensions import db
+from models import (
+    AcademicYear,
+    Course,
+    CourseAllocation,
+    TimeSlot,
+    FacultyAvailability,
+    FacultyLeave,
+    Timetable,
+    Classroom,
+    Laboratory
+)
+
+timetable_generator_bp = Blueprint(
+    "timetable_generator",
+    __name__
+)
+
+
+# ==========================================================
+# CHECK FACULTY AVAILABILITY
+# ==========================================================
+
+def faculty_is_available(
+    faculty_id,
+    day,
+    time_slot
+):
+    availability = FacultyAvailability.query.filter(
+        FacultyAvailability.faculty_id == faculty_id,
+        FacultyAvailability.day == day,
+        FacultyAvailability.is_available == True
+    ).all()
+
+    for item in availability:
+
+        if (
+            item.start_time <= time_slot.start_time
+            and item.end_time >= time_slot.end_time
+        ):
+            return True
+
+    return False
+
+
+# ==========================================================
+# CHECK FACULTY LEAVE
+# ==========================================================
+
+def faculty_on_leave(
+    faculty_id,
+    date_value,
+    time_slot
+):
+    leaves = FacultyLeave.query.filter(
+        FacultyLeave.faculty_id == faculty_id,
+        FacultyLeave.leave_date == date_value
+    ).all()
+
+    for leave in leaves:
+
+        if (
+            time_slot.start_time < leave.end_time
+            and time_slot.end_time > leave.start_time
+        ):
+            return True
+
+    return False
+
+
+# ==========================================================
+# CHECK TIMETABLE CONFLICT
+# ==========================================================
+
+def timetable_conflict(
+    academic_year_id,
+    allocation,
+    day,
+    time_slot_id,
+    division_id,
+    classroom_id=None,
+    laboratory_id=None
+):
+
+    existing_entries = Timetable.query.filter(
+        Timetable.academic_year_id == academic_year_id,
+        Timetable.day == day,
+        Timetable.time_slot_id == time_slot_id
+    ).all()
+
+    for existing in existing_entries:
+
+        # Division conflict
+        if existing.division_id == division_id:
+
+            if (
+                existing.batch_id is None
+                or allocation.batch_id is None
+            ):
+                return "Division is already scheduled"
+
+            if existing.batch_id == allocation.batch_id:
+                return "Batch is already scheduled"
+
+        # Faculty conflict
+        existing_allocation = CourseAllocation.query.get(
+            existing.allocation_id
+        )
+
+        if (
+            existing_allocation
+            and existing_allocation.faculty_id
+            == allocation.faculty_id
+        ):
+            return "Faculty is already scheduled"
+
+        # Classroom conflict
+        if (
+            classroom_id is not None
+            and existing.classroom_id == classroom_id
+        ):
+            return "Classroom is already occupied"
+
+        # Laboratory conflict
+        if (
+            laboratory_id is not None
+            and existing.laboratory_id == laboratory_id
+        ):
+            return "Laboratory is already occupied"
+
+    return None
+
+
+# ==========================================================
+# FIND AVAILABLE ROOM
+# ==========================================================
+
+def find_available_room(
+    academic_year_id,
+    allocation,
+    day,
+    time_slot_id,
+    course_type
+):
+
+    # ------------------------------------------------------
+    # Theory → Classroom only
+    # ------------------------------------------------------
+
+    if course_type.lower() == "theory":
+
+        classrooms = Classroom.query.filter(
+            Classroom.classroom_type == "Classroom"
+        ).all()
+
+        for classroom in classrooms:
+
+            conflict = timetable_conflict(
+                academic_year_id,
+                allocation,
+                day,
+                time_slot_id,
+                allocation.division_id,
+                classroom_id=classroom.classroom_id
+            )
+
+            if not conflict:
+                return classroom.classroom_id, None
+
+    # ------------------------------------------------------
+    # Practical → Laboratory only
+    # ------------------------------------------------------
+
+    elif course_type.lower() == "practical":
+
+        laboratories = Laboratory.query.all()
+
+        for laboratory in laboratories:
+
+            conflict = timetable_conflict(
+                academic_year_id,
+                allocation,
+                day,
+                time_slot_id,
+                allocation.division_id,
+                laboratory_id=laboratory.laboratory_id
+            )
+
+            if not conflict:
+                return None, laboratory.laboratory_id
+
+    return None, None
+
+
+# ==========================================================
+# GENERATE TIMETABLE
+# ==========================================================
+
+@timetable_generator_bp.route(
+    "/api/timetables/generate",
+    methods=["POST"]
+)
+def generate_timetable():
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({
+            "status": "error",
+            "message": "Request body is required"
+        }), 400
+
+    required_fields = [
+        "academic_year_id",
+        "days"
+    ]
+
+    for field in required_fields:
+
+        if field not in data:
+
+            return jsonify({
+                "status": "error",
+                "message": f"{field} is required"
+            }), 400
+
+    academic_year_id = data["academic_year_id"]
+    days = data["days"]
+
+    # ------------------------------------------------------
+    # Academic year
+    # ------------------------------------------------------
+
+    academic_year = AcademicYear.query.get(
+        academic_year_id
+    )
+
+    if not academic_year:
+
+        return jsonify({
+            "status": "error",
+            "message": "Academic year not found"
+        }), 404
+
+    # ------------------------------------------------------
+    # Get allocations
+    # ------------------------------------------------------
+
+    allocations = CourseAllocation.query.filter(
+        CourseAllocation.academic_year_id
+        == academic_year_id
+    ).all()
+
+    if not allocations:
+
+        return jsonify({
+            "status": "error",
+            "message": "No course allocations found"
+        }), 404
+
+    # ------------------------------------------------------
+    # Get time slots
+    # ------------------------------------------------------
+
+    time_slots = TimeSlot.query.order_by(
+        TimeSlot.start_time
+    ).all()
+
+    if not time_slots:
+
+        return jsonify({
+            "status": "error",
+            "message": "No time slots found"
+        }), 404
+
+    created = []
+    skipped = []
+
+   # ------------------------------------------------------
+# Try to schedule every allocation
+# ------------------------------------------------------
+
+for allocation in allocations:
+
+    # --------------------------------------------------
+    # Get course
+    # --------------------------------------------------
+
+    course = Course.query.get(
+        allocation.course_id
+    )
+
+    if not course:
+
+        skipped.append({
+            "allocation_id": allocation.allocation_id,
+            "message": "Course not found"
+        })
+
+        continue
+
+    course_type = (
+        course.course_type or ""
+    ).strip().lower()
+
+    weekly_hours = course.weekly_hours
+
+    if not weekly_hours or weekly_hours <= 0:
+
+        skipped.append({
+            "allocation_id": allocation.allocation_id,
+            "course_id": course.course_id,
+            "message": "Weekly hours not configured"
+        })
+
+        continue
+
+    # --------------------------------------------------
+    # Select correct time slots
+    # --------------------------------------------------
+
+    if course_type == "theory":
+
+        suitable_slots = [
+            slot for slot in time_slots
+            if slot.slot_type.lower() == "lecture"
+        ]
+
+    elif course_type == "practical":
+
+        suitable_slots = [
+            slot for slot in time_slots
+            if slot.slot_type.lower() == "practical"
+        ]
+
+    else:
+
+        skipped.append({
+            "allocation_id": allocation.allocation_id,
+            "course_id": course.course_id,
+            "message": f"Unsupported course type: {course.course_type}"
+        })
+
+        continue
+
+    # --------------------------------------------------
+    # Generate required weekly entries
+    # --------------------------------------------------
+
+    scheduled_count = 0
+
+    for day in days:
+
+        if scheduled_count >= weekly_hours:
+            break
+
+        for time_slot in suitable_slots:
+
+            if scheduled_count >= weekly_hours:
+                break
+
+            # ------------------------------------------
+            # Faculty availability
+            # ------------------------------------------
+
+            if not faculty_is_available(
+                allocation.faculty_id,
+                day,
+                time_slot
+            ):
+                continue
+
+            # ------------------------------------------
+            # Faculty leave
+            # ------------------------------------------
+
+            if faculty_on_leave(
+                allocation.faculty_id,
+                None,
+                time_slot
+            ):
+                continue
+
+            # ------------------------------------------
+            # Existing timetable conflict
+            # ------------------------------------------
+
+            conflict = timetable_conflict(
+                academic_year_id,
+                allocation,
+                day,
+                time_slot.time_slot_id,
+                allocation.division_id
+            )
+
+            if conflict:
+                continue
+
+            # ------------------------------------------
+            # Find suitable room
+            # ------------------------------------------
+
+            classroom_id, laboratory_id = (
+                find_available_room(
+                    academic_year_id,
+                    allocation,
+                    day,
+                    time_slot.time_slot_id,
+                    course.course_type
+                )
+            )
+
+            if (
+                classroom_id is None
+                and laboratory_id is None
+            ):
+                continue
+
+            # ------------------------------------------
+            # Create timetable entry
+            # ------------------------------------------
+
+            timetable = Timetable(
+                academic_year_id=academic_year_id,
+                allocation_id=allocation.allocation_id,
+                day=day,
+                time_slot_id=time_slot.time_slot_id,
+                division_id=allocation.division_id,
+                batch_id=allocation.batch_id,
+                classroom_id=classroom_id,
+                laboratory_id=laboratory_id
+            )
+
+            db.session.add(timetable)
+            db.session.flush()
+
+            created.append({
+                "timetable_id": timetable.timetable_id,
+                "allocation_id": allocation.allocation_id,
+                "course_id": course.course_id,
+                "course_name": course.course_name,
+                "course_type": course.course_type,
+                "faculty_id": allocation.faculty_id,
+                "division_id": allocation.division_id,
+                "batch_id": allocation.batch_id,
+                "day": day,
+                "time_slot_id": time_slot.time_slot_id,
+                "classroom_id": classroom_id,
+                "laboratory_id": laboratory_id
+            })
+
+            scheduled_count += 1
+
+    # --------------------------------------------------
+    # Check whether all weekly hours were scheduled
+    # --------------------------------------------------
+
+    if scheduled_count < weekly_hours:
+
+        skipped.append({
+            "allocation_id": allocation.allocation_id,
+            "course_id": course.course_id,
+            "course_name": course.course_name,
+            "faculty_id": allocation.faculty_id,
+            "division_id": allocation.division_id,
+            "scheduled_hours": scheduled_count,
+            "required_hours": weekly_hours,
+            "message": "Could not schedule all weekly hours"
+        })
