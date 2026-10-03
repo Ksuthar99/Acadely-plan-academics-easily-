@@ -3326,8 +3326,10 @@ function Login({ onLogin }) {
         throw new Error("Login token was not returned by the server.");
       }
 
-      if (user?.role !== "HOD") {
-        throw new Error("This portal is restricted to HOD accounts.");
+      const nextRole = String(user?.role || "").toUpperCase();
+
+      if (!["HOD", "FACULTY", "STUDENT"].includes(nextRole)) {
+        throw new Error("Invalid account role returned by the server.");
       }
 
       localStorage.setItem("acadely_token", token);
@@ -3352,11 +3354,11 @@ function Login({ onLogin }) {
         </div>
 
         <div className="login-brand-content">
-          <span className="eyebrow">HOD Portal</span>
+          <span className="eyebrow">Acadely Portal</span>
           <h1>Academic planning, organised.</h1>
           <p>
-            A central workspace for managing academic structure, courses,
-            faculty, resources and timetables for the department.
+            A single workspace for HODs, faculty and students to manage
+            academic structure, timetables, resources and department activity.
           </p>
         </div>
 
@@ -3375,10 +3377,10 @@ function Login({ onLogin }) {
             </div>
           </div>
 
-          <span className="eyebrow">HOD Portal</span>
-          <h2>Sign in</h2>
+          <span className="eyebrow">Sign in</span>
+          <h2>Welcome back</h2>
           <p className="login-description">
-            Use your authorised HOD account to continue.
+            Use your authorised Acadely account to continue.
           </p>
 
           <form onSubmit={submit}>
@@ -3418,6 +3420,1549 @@ function Login({ onLogin }) {
           </form>
         </div>
       </section>
+    </div>
+  );
+}
+
+/* =========================================================
+   FACULTY OVERVIEW PAGE
+========================================================= */
+
+function FacultyOverviewPage({
+  user,
+  allocations = [],
+  availability = [],
+  leaves = [],
+  courses = [],
+  divisions = [],
+  loading = false,
+}) {
+  const safeAllocations = Array.isArray(allocations) ? allocations : [];
+  const safeAvailability = Array.isArray(availability) ? availability : [];
+  const safeLeaves = Array.isArray(leaves) ? leaves : [];
+  const safeCourses = Array.isArray(courses) ? courses : [];
+  const safeDivisions = Array.isArray(divisions) ? divisions : [];
+
+  const availableCount = safeAvailability.filter(
+    (item) => item?.is_available
+  ).length;
+
+  const weeklyHours = safeAllocations.reduce((total, allocation) => {
+    const course = safeCourses.find(
+      (item) =>
+        Number(item?.course_id) === Number(allocation?.course_id)
+    );
+
+    return total + Number(course?.weekly_hours || 0);
+  }, 0);
+
+  function getCourse(courseId) {
+    return safeCourses.find(
+      (item) => Number(item?.course_id) === Number(courseId)
+    );
+  }
+
+  function getCourseName(courseId) {
+    const course = getCourse(courseId);
+    return course?.course_name || "Course";
+  }
+
+  function getCourseCode(courseId) {
+    const course = getCourse(courseId);
+
+    return (
+      course?.course_code ||
+      course?.code ||
+      String(courseId || "—")
+    );
+  }
+
+  function getDivisionName(divisionId) {
+    const division = safeDivisions.find(
+      (item) =>
+        Number(item?.division_id) === Number(divisionId)
+    );
+
+    return division?.division_name || "Division";
+  }
+
+  function navigateFaculty(page) {
+    window.dispatchEvent(
+      new CustomEvent("faculty-nav", {
+        detail: page,
+      })
+    );
+  }
+
+  return (
+    <>
+      {/* =====================================================
+          WELCOME SECTION
+      ===================================================== */}
+
+      <div className="welcome-section">
+        <div>
+          <span className="eyebrow">
+            Faculty workspace ·{" "}
+            {new Intl.DateTimeFormat("en", {
+              weekday: "long",
+              month: "long",
+              day: "numeric",
+            }).format(new Date())}
+          </span>
+
+          <h1>
+            Welcome, {user?.username || "Faculty"}.
+          </h1>
+
+          <p>
+            Manage your teaching assignments, availability,
+            timetable and leave requests from one place.
+          </p>
+        </div>
+
+        <div className="welcome-date">
+          <span>Role</span>
+
+          <strong>
+            <i className="workspace-live-dot" />
+            Faculty
+          </strong>
+        </div>
+      </div>
+
+      {/* =====================================================
+          SUMMARY CARDS
+      ===================================================== */}
+
+      <div className="stats-grid">
+
+        <StatCard
+          title="My Courses"
+          value={
+            loading
+              ? "—"
+              : safeAllocations.length
+          }
+          icon={Icons.academic}
+          text="Assigned courses"
+        />
+
+        <StatCard
+          title="Weekly Workload"
+          value={
+            loading
+              ? "—"
+              : `${weeklyHours} hrs`
+          }
+          icon={Icons.clock}
+          text="Teaching hours"
+        />
+
+        <StatCard
+          title="Availability"
+          value={
+            loading
+              ? "—"
+              : availableCount
+          }
+          icon={Icons.clock}
+          text="Available slots"
+        />
+
+        <StatCard
+          title="Leave Requests"
+          value={
+            loading
+              ? "—"
+              : safeLeaves.length
+          }
+          icon={Icons.calendar}
+          text="Leave records"
+        />
+
+      </div>
+
+      {/* =====================================================
+          MAIN DASHBOARD GRID
+      ===================================================== */}
+
+      <div className="dashboard-grid">
+
+        {/* =================================================
+            MY COURSES
+        ================================================= */}
+
+        <div className="content-card">
+
+          <div className="card-heading">
+            <div>
+              <h2>My Courses</h2>
+
+              <p>
+                Courses currently assigned to you.
+              </p>
+            </div>
+
+            <button
+              className="secondary-button"
+              onClick={() => navigateFaculty("courses")}
+            >
+              View all
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="empty-state">
+              Loading your courses...
+            </div>
+          ) : safeAllocations.length === 0 ? (
+            <div className="empty-state">
+              <strong>No courses assigned</strong>
+
+              <p>
+                Your assigned courses will appear here
+                once the HOD allocates them.
+              </p>
+            </div>
+          ) : (
+            <div className="planning-list">
+
+              {safeAllocations
+                .slice(0, 5)
+                .map((allocation) => {
+                  const course = getCourse(
+                    allocation?.course_id
+                  );
+
+                  return (
+                    <div
+                      key={
+                        allocation?.allocation_id ||
+                        `${allocation?.course_id}-${allocation?.division_id}`
+                      }
+                      className="planning-row"
+                    >
+
+                      <span className="planning-number">
+                        {getCourseCode(
+                          allocation?.course_id
+                        )}
+                      </span>
+
+                      <span className="planning-row-copy">
+                        <strong>
+                          {getCourseName(
+                            allocation?.course_id
+                          )}
+                        </strong>
+
+                        <span>
+                          {getDivisionName(
+                            allocation?.division_id
+                          )}
+                        </span>
+                      </span>
+
+                      <span className="course-hours">
+                        {course?.weekly_hours || 0} hrs/week
+                      </span>
+
+                    </div>
+                  );
+                })}
+
+            </div>
+          )}
+
+        </div>
+
+        {/* =================================================
+            QUICK ACTIONS
+        ================================================= */}
+
+        <div className="content-card">
+
+          <div className="card-heading">
+            <div>
+              <h2>Quick Actions</h2>
+
+              <p>
+                Common faculty actions.
+              </p>
+            </div>
+          </div>
+
+          <div className="planning-list">
+
+            <button
+              className="planning-row planning-row-button"
+              onClick={() => navigateFaculty("courses")}
+            >
+              <span className="planning-number">
+                A
+              </span>
+
+              <span className="planning-row-copy">
+                <strong>
+                  My Courses
+                </strong>
+
+                <span>
+                  Review your teaching assignments
+                </span>
+              </span>
+
+              <span className="dashboard-action-arrow">
+                →
+              </span>
+            </button>
+
+            <button
+              className="planning-row planning-row-button"
+              onClick={() =>
+                navigateFaculty("availability")
+              }
+            >
+              <span className="planning-number">
+                B
+              </span>
+
+              <span className="planning-row-copy">
+                <strong>
+                  Availability
+                </strong>
+
+                <span>
+                  Update your available time slots
+                </span>
+              </span>
+
+              <span className="dashboard-action-arrow">
+                →
+              </span>
+            </button>
+
+            <button
+              className="planning-row planning-row-button"
+              onClick={() =>
+                navigateFaculty("timetable")
+              }
+            >
+              <span className="planning-number">
+                C
+              </span>
+
+              <span className="planning-row-copy">
+                <strong>
+                  Timetable
+                </strong>
+
+                <span>
+                  Review your teaching schedule
+                </span>
+              </span>
+
+              <span className="dashboard-action-arrow">
+                →
+              </span>
+            </button>
+
+            <button
+              className="planning-row planning-row-button"
+              onClick={() =>
+                navigateFaculty("leaves")
+              }
+            >
+              <span className="planning-number">
+                D
+              </span>
+
+              <span className="planning-row-copy">
+                <strong>
+                  Leave Requests
+                </strong>
+
+                <span>
+                  Submit and track your leaves
+                </span>
+              </span>
+
+              <span className="dashboard-action-arrow">
+                →
+              </span>
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* =====================================================
+          FACULTY WORKFLOW
+      ===================================================== */}
+
+      <div className="content-card faculty-workflow-card">
+
+        <div className="card-heading">
+
+          <div>
+            <h2>Faculty Workflow</h2>
+
+            <p>
+              Keep your academic work organised.
+            </p>
+          </div>
+
+        </div>
+
+        <div className="planning-list">
+
+          <PlanningRow
+            number="01"
+            title="Course allocation"
+            text="Review the courses and divisions assigned to you."
+          />
+
+          <PlanningRow
+            number="02"
+            title="Faculty availability"
+            text="Keep your available teaching slots updated."
+          />
+
+          <PlanningRow
+            number="03"
+            title="Timetable"
+            text="Check when and where your classes are scheduled."
+          />
+
+          <PlanningRow
+            number="04"
+            title="Leave requests"
+            text="Submit and track your leave schedules."
+          />
+
+        </div>
+
+      </div>
+    </>
+  );
+}
+
+
+/* =========================================================
+   FACULTY PROFILE PAGE
+========================================================= */
+
+function FacultyProfilePage({ user }) {
+  return (
+    <>
+      <PageHeader
+        title="My Profile"
+        description="Your faculty account and details."
+      />
+
+      <div className="content-card settings-panel">
+
+        <div className="settings-row">
+          <div>
+            <strong>Full name</strong>
+            <p>
+              {user?.username || "Faculty member"}
+            </p>
+          </div>
+
+          <span className="role-badge">
+            FACULTY
+          </span>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <strong>Email</strong>
+
+            <p>
+              {user?.email || "Not available"}
+            </p>
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <strong>Faculty ID</strong>
+
+            <p>
+              {user?.faculty_id || "Not assigned"}
+            </p>
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <strong>Access type</strong>
+
+            <p>
+              Faculty dashboard
+            </p>
+          </div>
+        </div>
+
+      </div>
+    </>
+  );
+}
+
+
+/* =========================================================
+   FACULTY DASHBOARD
+========================================================= */
+
+function FacultyDashboard({ user, onLogout }) {
+
+  const [activePage, setActivePage] =
+    useState("dashboard");
+
+  const [sidebarOpen, setSidebarOpen] =
+    useState(false);
+
+  const [globalSearch, setGlobalSearch] =
+    useState("");
+
+  const [academicYears, setAcademicYears] =
+    useState([]);
+
+  const [divisions, setDivisions] =
+    useState([]);
+
+  const [batches, setBatches] =
+    useState([]);
+
+  const [courses, setCourses] =
+    useState([]);
+
+  const [faculty, setFaculty] =
+    useState([]);
+
+  const [classrooms, setClassrooms] =
+    useState([]);
+
+  const [laboratories, setLaboratories] =
+    useState([]);
+
+  const [timeSlots, setTimeSlots] =
+    useState([]);
+
+  const [allocations, setAllocations] =
+    useState([]);
+
+  const [availability, setAvailability] =
+    useState([]);
+
+  const [leaves, setLeaves] =
+    useState([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+
+  /* =====================================================
+     LOAD FACULTY DATA
+  ===================================================== */
+
+  async function loadFacultyData() {
+
+    try {
+
+      setLoading(true);
+
+      const results = await Promise.all([
+        apiRequest("/api/academic-years"),
+        apiRequest("/api/divisions"),
+        apiRequest("/api/batches"),
+        apiRequest("/api/courses"),
+        apiRequest("/api/faculty"),
+        apiRequest("/api/classrooms"),
+        apiRequest("/api/laboratories"),
+        apiRequest("/api/time-slots"),
+        apiRequest("/api/course-allocations"),
+        apiRequest("/api/faculty-availability"),
+        apiRequest("/api/faculty-leaves"),
+      ]);
+
+      setAcademicYears(
+        asArray(results[0])
+      );
+
+      setDivisions(
+        asArray(results[1])
+      );
+
+      setBatches(
+        asArray(results[2])
+      );
+
+      setCourses(
+        asArray(results[3])
+      );
+
+      setFaculty(
+        asArray(results[4])
+      );
+
+      setClassrooms(
+        asArray(results[5])
+      );
+
+      setLaboratories(
+        asArray(results[6])
+      );
+
+      setTimeSlots(
+        asArray(results[7])
+      );
+
+      setAllocations(
+        asArray(results[8])
+      );
+
+      setAvailability(
+        asArray(results[9])
+      );
+
+      setLeaves(
+        asArray(results[10])
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Failed to load faculty dashboard data:",
+        error
+      );
+
+    } finally {
+
+      setLoading(false);
+
+    }
+  }
+
+
+  /* =====================================================
+     INITIAL LOAD
+  ===================================================== */
+
+  useEffect(() => {
+
+    loadFacultyData();
+
+  }, [user?.faculty_id]);
+
+
+  /* =====================================================
+     FACULTY NAVIGATION EVENT
+  ===================================================== */
+
+  useEffect(() => {
+
+    const handler = (event) => {
+
+      if (event?.detail) {
+        setActivePage(event.detail);
+      }
+
+    };
+
+    window.addEventListener(
+      "faculty-nav",
+      handler
+    );
+
+    return () => {
+
+      window.removeEventListener(
+        "faculty-nav",
+        handler
+      );
+
+    };
+
+  }, []);
+
+
+  /* =====================================================
+     SIDEBAR NAVIGATION
+  ===================================================== */
+
+  const facultyNavigation = [
+
+    {
+      title: "Overview",
+
+      items: [
+        {
+          key: "dashboard",
+          label: "Dashboard",
+          icon: Icons.dashboard,
+        },
+      ],
+    },
+
+    {
+      title: "Academic",
+
+      items: [
+        {
+          key: "courses",
+          label: "My Courses",
+          icon: Icons.book,
+        },
+
+        {
+          key: "timetable",
+          label: "Timetable",
+          icon: Icons.calendar,
+        },
+      ],
+    },
+
+    {
+      title: "Faculty",
+
+      items: [
+        {
+          key: "availability",
+          label: "Availability",
+          icon: Icons.clock,
+        },
+
+        {
+          key: "leaves",
+          label: "Leave Requests",
+          icon: Icons.calendar,
+        },
+
+        {
+          key: "profile",
+          label: "My Profile",
+          icon: Icons.users,
+        },
+      ],
+    },
+
+  ];
+
+
+  /* =====================================================
+     CURRENT PAGE LABEL
+  ===================================================== */
+
+  const currentLabel =
+    facultyNavigation
+      .flatMap((group) => group.items)
+      .find(
+        (item) =>
+          item.key === activePage
+      )?.label || "Dashboard";
+
+
+  /* =====================================================
+     RENDER PAGE
+  ===================================================== */
+
+  function renderPage() {
+
+    const facultyProfile =
+      faculty.find(
+        (member) =>
+          Number(member?.faculty_id) ===
+          Number(user?.faculty_id)
+      ) || {
+        faculty_id: user?.faculty_id,
+        faculty_name:
+          user?.username || "Faculty",
+        faculty_email:
+          user?.email || "",
+      };
+
+
+    const myAllocations =
+      allocations.filter(
+        (allocation) =>
+          Number(allocation?.faculty_id) ===
+          Number(user?.faculty_id)
+      );
+
+
+    const myAvailability =
+      availability.filter(
+        (slot) =>
+          Number(slot?.faculty_id) ===
+          Number(user?.faculty_id)
+      );
+
+
+    const myLeaves =
+      leaves.filter(
+        (item) =>
+          Number(item?.faculty_id) ===
+          Number(user?.faculty_id)
+      );
+
+
+    switch (activePage) {
+
+      /* =================================================
+         DASHBOARD
+      ================================================= */
+
+      case "dashboard":
+
+        return (
+          <FacultyOverviewPage
+            user={user}
+            allocations={myAllocations}
+            availability={myAvailability}
+            leaves={myLeaves}
+            courses={courses}
+            divisions={divisions}
+            loading={loading}
+          />
+        );
+
+
+      /* =================================================
+         MY COURSES
+      ================================================= */
+
+      case "courses":
+
+        return (
+          <CourseAllocationPage
+            courses={courses}
+            faculty={
+              facultyProfile
+                ? [facultyProfile]
+                : []
+            }
+            divisions={divisions}
+            batches={batches}
+            academicYears={academicYears}
+          />
+        );
+
+
+      /* =================================================
+         AVAILABILITY
+      ================================================= */
+
+      case "availability":
+
+        return (
+          <FacultyAvailabilityPage
+            faculty={
+              facultyProfile
+                ? [facultyProfile]
+                : []
+            }
+          />
+        );
+
+
+      /* =================================================
+         LEAVE REQUESTS
+      ================================================= */
+
+      case "leaves":
+
+        return (
+          <FacultyLeavesPage
+            faculty={
+              facultyProfile
+                ? [facultyProfile]
+                : []
+            }
+          />
+        );
+
+
+      /* =================================================
+         TIMETABLE
+      ================================================= */
+
+      case "timetable":
+
+        return (
+          <TimetablePage
+            academicYears={academicYears}
+            divisions={divisions}
+            batches={batches}
+            courses={courses}
+            faculty={faculty}
+            classrooms={classrooms}
+            laboratories={laboratories}
+            timeSlots={timeSlots}
+            allocations={allocations}
+          />
+        );
+
+
+      /* =================================================
+         PROFILE
+      ================================================= */
+
+      case "profile":
+
+        return (
+          <FacultyProfilePage
+            user={user}
+          />
+        );
+
+
+      /* =================================================
+         DEFAULT
+      ================================================= */
+
+      default:
+
+        return (
+          <FacultyOverviewPage
+            user={user}
+            allocations={myAllocations}
+            availability={myAvailability}
+            leaves={myLeaves}
+            courses={courses}
+            divisions={divisions}
+            loading={loading}
+          />
+        );
+    }
+  }
+
+
+  /* =====================================================
+     DASHBOARD UI
+  ===================================================== */
+
+  return (
+
+    <div className="erp-layout">
+
+      {/* =================================================
+          MOBILE SIDEBAR OVERLAY
+      ================================================= */}
+
+      {sidebarOpen && (
+        <div
+          className="mobile-sidebar-overlay"
+          onClick={() =>
+            setSidebarOpen(false)
+          }
+        />
+      )}
+
+
+      {/* =================================================
+          SIDEBAR
+      ================================================= */}
+
+      <aside
+        className={`sidebar ${
+          sidebarOpen ? "open" : ""
+        }`}
+      >
+
+        {/* BRAND */}
+
+        <div className="sidebar-brand">
+
+          <div className="brand-mark">
+            A
+          </div>
+
+          <div>
+            <strong>
+              Acadely
+            </strong>
+
+            <span>
+              Faculty Portal
+            </span>
+          </div>
+
+        </div>
+
+
+        {/* NAVIGATION */}
+
+        <div className="sidebar-scroll">
+
+          {facultyNavigation.map(
+            (group) => (
+
+              <div
+                className="nav-group"
+                key={group.title}
+              >
+
+                <div className="nav-group-title">
+                  {group.title}
+                </div>
+
+                {group.items.map(
+                  (item) => (
+
+                    <button
+                      key={item.key}
+                      className={`nav-item ${
+                        activePage === item.key
+                          ? "active"
+                          : ""
+                      }`}
+                      onClick={() => {
+
+                        setActivePage(
+                          item.key
+                        );
+
+                        setSidebarOpen(
+                          false
+                        );
+
+                      }}
+                    >
+
+                      <span className="nav-icon">
+                        {item.icon}
+                      </span>
+
+                      <span>
+                        {item.label}
+                      </span>
+
+                    </button>
+
+                  )
+                )}
+
+              </div>
+
+            )
+          )}
+
+        </div>
+
+
+        {/* =================================================
+            SIDEBAR USER
+        ================================================= */}
+
+        <div className="sidebar-user">
+
+          <div className="avatar">
+            {(
+              user?.username || "F"
+            )
+              .charAt(0)
+              .toUpperCase()}
+          </div>
+
+          <div className="sidebar-user-info">
+
+            <strong>
+              {user?.username || "Faculty"}
+            </strong>
+
+            <span>
+              Faculty
+            </span>
+
+          </div>
+
+          <button
+            className="logout-button"
+            onClick={onLogout}
+            title="Logout"
+          >
+            {Icons.logout}
+          </button>
+
+        </div>
+
+      </aside>
+
+
+      {/* =================================================
+          MAIN AREA
+      ================================================= */}
+
+      <main className="main-area">
+
+
+        {/* =================================================
+            TOPBAR
+        ================================================= */}
+
+        <header className="topbar">
+
+          <div className="topbar-left">
+
+            <button
+              className="mobile-menu-button"
+              onClick={() =>
+                setSidebarOpen(true)
+              }
+            >
+              {Icons.menu}
+            </button>
+
+            <div className="breadcrumbs">
+
+              <span>
+                Acadely
+              </span>
+
+              <b>
+                /
+              </b>
+
+              <strong>
+                {currentLabel}
+              </strong>
+
+            </div>
+
+          </div>
+
+
+          {/* =================================================
+              TOPBAR RIGHT
+          ================================================= */}
+
+          <div className="topbar-right">
+
+            <div className="topbar-search">
+
+              {Icons.search}
+
+              <input
+                value={globalSearch}
+                onChange={(event) =>
+                  setGlobalSearch(
+                    event.target.value
+                  )
+                }
+                placeholder="Search..."
+              />
+
+            </div>
+
+
+            <button
+              className="notification-button"
+              title="Notifications"
+            >
+              {Icons.bell}
+              <span />
+            </button>
+
+
+            <div className="topbar-profile">
+
+              <div className="avatar">
+
+                {(
+                  user?.username || "F"
+                )
+                  .charAt(0)
+                  .toUpperCase()}
+
+              </div>
+
+              <div>
+
+                <strong>
+                  {user?.username || "Faculty"}
+                </strong>
+
+                <span>
+                  Faculty
+                </span>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </header>
+
+
+        {/* =================================================
+            PAGE CONTENT
+        ================================================= */}
+
+        <section className="page-content">
+
+          {renderPage()}
+
+        </section>
+
+      </main>
+
+    </div>
+  );
+}
+
+/* =========================================================
+   STUDENT DASHBOARD SHELL
+========================================================= */
+
+function StudentOverviewPage({ user, student, loading }) {
+  return (
+    <>
+      <div className="welcome-section">
+        <div>
+          <span className="eyebrow">Student workspace · {new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric" }).format(new Date())}</span>
+          <h1>Hello, {user?.username || "Student"}.</h1>
+          <p>
+            Track your academic progress, timetable and study workflow from this student portal.
+          </p>
+        </div>
+
+        <div className="welcome-date">
+          <span>Student</span>
+          <strong><i className="workspace-live-dot" />Portal</strong>
+        </div>
+      </div>
+
+      <div className="stats-grid">
+        <StatCard title="Roll Number" value={loading ? "—" : student?.roll_number || "—"} icon={Icons.student} text="Student record" />
+        <StatCard title="Program" value={loading ? "—" : student?.program_name || "—"} icon={Icons.academic} text="Academic program" />
+        <StatCard title="Division" value={loading ? "—" : student?.division_name || "—"} icon={Icons.users} text="Current division" />
+      </div>
+
+      <div className="dashboard-grid">
+        <div className="content-card">
+          <div className="card-heading">
+            <div>
+              <h2>Student workflow</h2>
+              <p>Keep your academic journey updated.</p>
+            </div>
+          </div>
+
+          <div className="planning-list">
+            <PlanningRow number="01" title="Timetable" text="Review your lecture and practical schedule." />
+            <PlanningRow number="02" title="Courses" text="Check the subjects assigned for your class." />
+            <PlanningRow number="03" title="Attendance" text="View attendance trends and updates." />
+            <PlanningRow number="04" title="Marks" text="Monitor academic performance and assessment status." />
+          </div>
+        </div>
+
+        <div className="content-card">
+          <div className="card-heading">
+            <div>
+              <h2>Academic summary</h2>
+              <p>At a glance.</p>
+            </div>
+          </div>
+
+          <div className="planning-list">
+            <button className="planning-row planning-row-button" onClick={() => window.dispatchEvent(new CustomEvent("student-nav", { detail: "timetable" }))}>
+              <span className="planning-number">A</span>
+              <span className="planning-row-copy"><strong>Timetable</strong><span>Open weekly schedule</span></span>
+              <span className="dashboard-action-arrow">→</span>
+            </button>
+            <button className="planning-row planning-row-button" onClick={() => window.dispatchEvent(new CustomEvent("student-nav", { detail: "courses" }))}>
+              <span className="planning-number">B</span>
+              <span className="planning-row-copy"><strong>Courses</strong><span>View assigned academic subjects</span></span>
+              <span className="dashboard-action-arrow">→</span>
+            </button>
+            <button className="planning-row planning-row-button" onClick={() => window.dispatchEvent(new CustomEvent("student-nav", { detail: "marks" }))}>
+              <span className="planning-number">C</span>
+              <span className="planning-row-copy"><strong>Marks</strong><span>Check evaluation results</span></span>
+              <span className="dashboard-action-arrow">→</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function StudentProfilePage({ user, student }) {
+  return (
+    <>
+      <PageHeader title="My Profile" description="Your student account information." />
+
+      <div className="content-card settings-panel">
+        <div className="settings-row">
+          <div>
+            <strong>Student name</strong>
+            <p>{student?.student_name || user?.username || "Student"}</p>
+          </div>
+          <span className="role-badge">STUDENT</span>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <strong>Email</strong>
+            <p>{student?.student_email || user?.email || "Not available"}</p>
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <strong>Roll number</strong>
+            <p>{student?.roll_number || "Not assigned"}</p>
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <strong>Academic details</strong>
+            <p>{student?.program_name || "Program"} · {student?.division_name || "Division"}</p>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function StudentDashboard({ user, onLogout }) {
+  const [activePage, setActivePage] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [globalSearch, setGlobalSearch] = useState("");
+  const [student, setStudent] = useState(null);
+  const [students, setStudents] = useState([]);
+  const [academicYears, setAcademicYears] = useState([]);
+  const [divisions, setDivisions] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [faculty, setFaculty] = useState([]);
+  const [classrooms, setClassrooms] = useState([]);
+  const [laboratories, setLaboratories] = useState([]);
+  const [timeSlots, setTimeSlots] = useState([]);
+  const [allocations, setAllocations] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  async function loadStudentData() {
+    try {
+      setLoading(true);
+
+      const [studentsData, academicYearsData, divisionsData, batchesData, coursesData, facultyData, classroomsData, labsData, timeSlotsData, allocationsData] = await Promise.all([
+        apiRequest("/api/students"),
+        apiRequest("/api/academic-years"),
+        apiRequest("/api/divisions"),
+        apiRequest("/api/batches"),
+        apiRequest("/api/courses"),
+        apiRequest("/api/faculty"),
+        apiRequest("/api/classrooms"),
+        apiRequest("/api/laboratories"),
+        apiRequest("/api/time-slots"),
+        apiRequest("/api/course-allocations"),
+      ]);
+
+      const studentList = asArray(studentsData);
+      const currentStudent = studentList.find((item) => Number(item.student_id) === Number(user?.student_id)) || null;
+
+      setStudents(studentList);
+      setStudent(currentStudent);
+      setAcademicYears(asArray(academicYearsData));
+      setDivisions(asArray(divisionsData));
+      setBatches(asArray(batchesData));
+      setCourses(asArray(coursesData));
+      setFaculty(asArray(facultyData));
+      setClassrooms(asArray(classroomsData));
+      setLaboratories(asArray(labsData));
+      setTimeSlots(asArray(timeSlotsData));
+      setAllocations(asArray(allocationsData));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadStudentData();
+  }, [user?.student_id]);
+
+  useEffect(() => {
+    const handler = (event) => {
+      setActivePage(event.detail);
+    };
+
+    window.addEventListener("student-nav", handler);
+    return () => window.removeEventListener("student-nav", handler);
+  }, []);
+
+  const studentNavigation = [
+    { title: "Overview", items: [{ key: "dashboard", label: "Dashboard", icon: Icons.dashboard }] },
+    { title: "Academic", items: [{ key: "timetable", label: "Timetable", icon: Icons.calendar }, { key: "courses", label: "Courses", icon: Icons.book }, { key: "marks", label: "Marks", icon: Icons.check }] },
+    { title: "Student", items: [{ key: "attendance", label: "Attendance", icon: Icons.clock }, { key: "materials", label: "Study Material", icon: Icons.book }, { key: "profile", label: "My Profile", icon: Icons.student }] },
+  ];
+
+  const currentLabel = studentNavigation.flatMap((group) => group.items).find((item) => item.key === activePage)?.label || "Dashboard";
+
+  function renderPage() {
+    const selectedDivision = student?.division_id
+      ? Number(student.division_id)
+      : divisions[0]?.division_id;
+
+    const selectedYear = academicYears[0]?.academic_year_id || "";
+
+    switch (activePage) {
+      case "dashboard":
+        return <StudentOverviewPage user={user} student={student} loading={loading} />;
+      case "timetable":
+        return (
+          <TimetablePage
+            academicYears={academicYears}
+            divisions={divisions}
+            batches={batches}
+            courses={courses}
+            faculty={faculty}
+            classrooms={classrooms}
+            laboratories={laboratories}
+            timeSlots={timeSlots}
+            allocations={allocations}
+          />
+        );
+      case "courses":
+        return (
+          <div className="content-card">
+            <PageHeader title="My Courses" description="Current academic subjects assigned to your class." />
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Course</th>
+                    <th>Type</th>
+                    <th>Credits</th>
+                    <th>Faculty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allocations
+                    .filter((item) => Number(item.division_id) === Number(selectedDivision))
+                    .map((allocation) => {
+                      const course = courses.find((item) => Number(item.course_id) === Number(allocation.course_id));
+                      const teacher = faculty.find((item) => Number(item.faculty_id) === Number(allocation.faculty_id));
+
+                      return (
+                        <tr key={allocation.allocation_id}>
+                          <td>{course?.course_name || allocation.course_id}</td>
+                          <td>{course?.course_type || "—"}</td>
+                          <td>{course?.course_credit || "—"}</td>
+                          <td>{teacher?.faculty_name || allocation.faculty_id}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      case "marks":
+        return (
+          <div className="content-card">
+            <PageHeader title="Marks" description="Academic performance overview." />
+            <EmptyState message="Marks dashboard is ready for integration with the assessment module." />
+          </div>
+        );
+      case "attendance":
+        return (
+          <div className="content-card">
+            <PageHeader title="Attendance" description="Attendance records and performance summary." />
+            <EmptyState message="Attendance tracking will be connected to the attendance module soon." />
+          </div>
+        );
+      case "materials":
+        return (
+          <div className="content-card">
+            <PageHeader title="Study Material" description="Course notes and academic resources." />
+            <EmptyState message="Study material and notices module is currently under development." />
+          </div>
+        );
+      case "profile":
+        return <StudentProfilePage user={user} student={student} />;
+      default:
+        return <StudentOverviewPage user={user} student={student} loading={loading} />;
+    }
+  }
+
+  return (
+    <div className="erp-layout">
+      {sidebarOpen && <div className="mobile-sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+
+      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+        <div className="sidebar-brand">
+          <div className="brand-mark">A</div>
+          <div>
+            <strong>Acadely</strong>
+            <span>Student Portal</span>
+          </div>
+        </div>
+
+        <div className="sidebar-scroll">
+          {studentNavigation.map((group) => (
+            <div className="nav-group" key={group.title}>
+              <div className="nav-group-title">{group.title}</div>
+              {group.items.map((item) => (
+                <button key={item.key} className={`nav-item ${activePage === item.key ? "active" : ""}`} onClick={() => { setActivePage(item.key); setSidebarOpen(false); }}>
+                  <span className="nav-icon">{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="sidebar-user">
+          <div className="avatar">{(user?.username || "S").charAt(0).toUpperCase()}</div>
+          <div className="sidebar-user-info">
+            <strong>{user?.username || "Student"}</strong>
+            <span>Student</span>
+          </div>
+          <button className="logout-button" onClick={onLogout} title="Logout">{Icons.logout}</button>
+        </div>
+      </aside>
+
+      <main className="main-area">
+        <header className="topbar">
+          <div className="topbar-left">
+            <button className="mobile-menu-button" onClick={() => setSidebarOpen(true)}>{Icons.menu}</button>
+            <div className="breadcrumbs">
+              <span>Acadely</span>
+              <b>/</b>
+              <strong>{currentLabel}</strong>
+            </div>
+          </div>
+
+          <div className="topbar-right">
+            <div className="topbar-search">
+              {Icons.search}
+              <input value={globalSearch} onChange={(e) => setGlobalSearch(e.target.value)} placeholder="Search..." />
+            </div>
+
+            <button className="notification-button" title="Notifications">
+              {Icons.bell}
+              <span />
+            </button>
+
+            <div className="topbar-profile">
+              <div className="avatar">{(user?.username || "S").charAt(0).toUpperCase()}</div>
+              <div>
+                <strong>{user?.username || "Student"}</strong>
+                <span>Student</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section className="page-content">{renderPage()}</section>
+      </main>
     </div>
   );
 }
@@ -3771,7 +5316,6 @@ function HODDashboard({ user, onLogout }) {
     </div>
   );
 }
-
 /* =========================================================
    ROOT APP
 ========================================================= */
@@ -3793,7 +5337,12 @@ export default function App() {
         const data = await apiRequest("/api/auth/me");
         const currentUser = data?.user || data;
 
-        if (currentUser?.role !== "HOD") {
+        // Accept all supported roles
+        if (
+          currentUser?.role !== "HOD" &&
+          currentUser?.role !== "FACULTY" &&
+          currentUser?.role !== "STUDENT"
+        ) {
           throw new Error("Invalid role");
         }
 
@@ -3829,6 +5378,27 @@ export default function App() {
     return <Login onLogin={setUser} />;
   }
 
+  // Faculty
+  if (user.role === "FACULTY") {
+    return (
+      <FacultyDashboard
+        user={user}
+        onLogout={() => setUser(null)}
+      />
+    );
+  }
+
+  // Student
+  if (user.role === "STUDENT") {
+    return (
+      <StudentDashboard
+        user={user}
+        onLogout={() => setUser(null)}
+      />
+    );
+  }
+
+  // HOD
   return (
     <HODDashboard
       user={user}
